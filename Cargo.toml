@@ -5,8 +5,21 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.104"
+ctrlc = "3.5.2"
 log = "0.4"
 pretty_env_logger = "0.5"
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_Media_Audio",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 # Lint list yoinked from https://github.com/microsoft/openvmm/blob/main/Cargo.toml
 
