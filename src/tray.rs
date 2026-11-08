@@ -75,8 +75,8 @@ use windows::core::BOOL;
 use windows::core::PCWSTR;
 use windows::core::w;
 
-use crate::ClaimTracker;
-use crate::console::ConsoleManager;
+use crate::claims::ClaimTracker;
+use crate::console;
 
 /// Custom window message sent by the Windows shell when tray icon events occur.
 const WM_TRAY_CALLBACK: u32 = WM_USER + 101;
@@ -199,7 +199,7 @@ fn create_custom_icon(enabled: bool) -> HICON {
     // SAFETY: Creating 32bpp color bitmap with ARGB pixels for HICON creation.
     let hbm_color = unsafe { CreateBitmap(W, H, 1, 32, Some(pixels.as_ptr().cast())) };
 
-    if !hbm_mask.is_invalid() && !hbm_color.is_invalid() {
+    let icon = if !hbm_mask.is_invalid() && !hbm_color.is_invalid() {
         let icon_info = ICONINFO {
             fIcon: BOOL(1),
             xHotspot: 0,
@@ -209,27 +209,24 @@ fn create_custom_icon(enabled: bool) -> HICON {
         };
 
         // SAFETY: Assembling icon from mask and color bitmaps.
-        let hicon = unsafe { CreateIconIndirect(&icon_info) };
+        unsafe { CreateIconIndirect(&icon_info) }.ok()
+    } else {
+        None
+    };
 
-        // SAFETY: Deleting temporary GDI bitmaps once icon has been created.
-        unsafe {
+    // SAFETY: Deleting temporary GDI bitmaps once icon assembly attempt
+    // finishes.
+    unsafe {
+        if !hbm_mask.is_invalid() {
             let _ = DeleteObject(hbm_mask.into());
+        }
+        if !hbm_color.is_invalid() {
             let _ = DeleteObject(hbm_color.into());
         }
+    }
 
-        if let Ok(icon) = hicon {
-            return icon;
-        }
-    } else {
-        // SAFETY: Cleaning up whichever bitmap succeeded if one failed.
-        unsafe {
-            if !hbm_mask.is_invalid() {
-                let _ = DeleteObject(hbm_mask.into());
-            }
-            if !hbm_color.is_invalid() {
-                let _ = DeleteObject(hbm_color.into());
-            }
-        }
+    if let Some(icon) = icon {
+        return icon;
     }
 
     // SAFETY: Fallback to standard application icon if custom icon creation
@@ -320,7 +317,7 @@ fn show_context_menu(hwnd: HWND) {
         MF_UNCHECKED | MF_STRING
     };
 
-    let console_visible = ConsoleManager::is_console_visible();
+    let console_visible = console::is_visible();
     let console_text = if console_visible {
         w!("Hide Console Log Window")
     } else {
@@ -329,12 +326,11 @@ fn show_context_menu(hwnd: HWND) {
 
     // Determine userscript status string
     let userscript_claimed = state.context.claim_tracker.has_any_claims();
-    let userscript_text_str = if userscript_claimed {
-        "Browser Userscript: Active\0"
+    let userscript_text = if userscript_claimed {
+        w!("Browser Userscript: Active")
     } else {
-        "Browser Userscript: Idle (Port 38400)\0"
+        w!("Browser Userscript: Idle (Port 38400)")
     };
-    let userscript_utf16: Vec<u16> = userscript_text_str.encode_utf16().collect();
 
     // SAFETY: Appending menu items to the popup menu.
     unsafe {
@@ -373,7 +369,7 @@ fn show_context_menu(hwnd: HWND) {
             hmenu,
             MF_DISABLED | MF_GRAYED | MF_STRING,
             0,
-            PCWSTR::from_raw(userscript_utf16.as_ptr()),
+            userscript_text,
         );
 
         let _ = AppendMenuW(hmenu, MF_SEPARATOR, 0, PCWSTR::null());
@@ -416,7 +412,7 @@ fn handle_command(hwnd: HWND, cmd_id: usize) {
             state.context.reset_requested.store(true, Ordering::SeqCst);
         }
         CMD_TOGGLE_CONSOLE => {
-            ConsoleManager::toggle_console();
+            console::toggle();
         }
         CMD_ABOUT => {
             show_about_dialog(hwnd);
