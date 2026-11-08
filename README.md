@@ -9,8 +9,13 @@ Dynamically pans audio per-application (and per browser tab!) based on where eac
 
 ## Justification
 
+*chinese bible on the left, mozart on the right. need I say more*
+
 ![chinese bible on the left, mozart on the right](docs/shitpost.png)
-*chinese bible on the left, mozart on the right*
+
+*demo video is best enjoyed with stereo speakers / headphones*
+
+https://github.com/user-attachments/assets/666e1a7a-9529-4e11-bbd3-104c3fe9534b
 
 This is a shitpost idea I've had in my head for years now (like, at _least_ 2018), but could never justify actually spending the time to implement it.
 
