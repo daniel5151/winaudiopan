@@ -2,6 +2,9 @@
 
 Dynamically pans audio per-application (and per browser tab!) based on where each window is positioned on your screen.
 
+[![GitHub Release](https://img.shields.io/github/v/release/daniel5151/winaudiopan?logo=github&label=Release)](https://github.com/daniel5151/winaudiopan/releases/latest)
+[![Download winaudiopan.exe](https://img.shields.io/badge/download-winaudiopan.exe-success?logo=windows)](https://github.com/daniel5151/winaudiopan/releases/latest/download/winaudiopan.exe)
+
 ---
 
 ## Justification
@@ -53,9 +56,7 @@ Enjoy?
 
 ### 1. Desktop Application
 
-Requires a stable Rust toolchain on Windows.
-
-Build the release executable:
+Download the pre-built [`winaudiopan.exe`](https://github.com/daniel5151/winaudiopan/releases/latest/download/winaudiopan.exe) from the [Latest Release](https://github.com/daniel5151/winaudiopan/releases/latest), or build from source:
 
 ```pwsh
 cargo build --release
