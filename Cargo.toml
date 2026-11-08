@@ -2,6 +2,9 @@
 name = "winaudiopan"
 version = "0.1.0"
 edition = "2024"
+authors = ["Daniel Prilik"]
+repository = "https://github.com/daniel5151/winaudiopan"
+description = "Dynamically pan audio per-application based on window on-screen position"
 
 [dependencies]
 anyhow = "1.0.104"
@@ -15,9 +18,12 @@ windows = { version = "0.62.2", features = [
     "Win32_Media_Audio",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
+    "Win32_System_Console",
     "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_LibraryLoader",
     "Win32_System_Threading",
     "Win32_System_Variant",
+    "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
 

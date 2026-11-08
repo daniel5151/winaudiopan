@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         WinAudioPan In-Tab Spatial Panner
-// @namespace    https://github.com/danielprilik/winaudiopan
+// @namespace    https://github.com/daniel5151/winaudiopan
 // @version      0.2.2
 // @description  Independently pans audio per-tab based on window screen position, active only while the WinAudioPan desktop server is running.
 // @match        *://*.youtube.com/*

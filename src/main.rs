@@ -1,6 +1,11 @@
 //! WinAudioPan - Dynamically pan audio per-application based on window
 //! on-screen position.
 
+#![windows_subsystem = "windows"]
+
+mod console;
+mod tray;
+
 use std::collections::HashMap;
 use std::io::Read;
 use std::io::Write;
@@ -63,6 +68,9 @@ use windows::Win32::UI::WindowsAndMessaging::WS_EX_TOOLWINDOW;
 use windows::core::BOOL;
 use windows::core::Interface;
 
+use crate::console::ConsoleManager;
+use crate::tray::TrayContext;
+
 /// Maximum stereo panning strength factor (0.0 = completely center, 1.0 = hard
 /// 100% pan).
 const PAN_STRENGTH: f64 = 1.0;
@@ -102,7 +110,7 @@ impl Drop for ComGuard {
 
 /// Tracks applications claimed by in-tab userscripts per tab ID.
 #[derive(Default)]
-struct ClaimTracker {
+pub struct ClaimTracker {
     /// Map of claimed application -> (map of tab_id -> last_heartbeat).
     claims: Mutex<HashMap<String, HashMap<String, Instant>>>,
 }
@@ -110,7 +118,7 @@ struct ClaimTracker {
 impl ClaimTracker {
     /// Checks whether an executable name is currently claimed by any active
     /// tab.
-    fn is_claimed(&self, exe_name: &str) -> bool {
+    pub fn is_claimed(&self, exe_name: &str) -> bool {
         let exe_lower = exe_name.to_lowercase();
         let mut guard = self.claims.lock().unwrap();
         guard.retain(|_, tabs| {
@@ -120,8 +128,18 @@ impl ClaimTracker {
         guard.keys().any(|claimed| exe_lower.contains(claimed))
     }
 
+    /// Checks whether any applications or browser tabs are currently active.
+    pub fn has_any_claims(&self) -> bool {
+        let mut guard = self.claims.lock().unwrap();
+        guard.retain(|_, tabs| {
+            tabs.retain(|_, time| time.elapsed() < CLAIM_TTL);
+            !tabs.is_empty()
+        });
+        !guard.is_empty()
+    }
+
     /// Records or refreshes a claim for a specific application tab.
-    fn record_claim(&self, app: &str, tab_id: &str) {
+    pub fn record_claim(&self, app: &str, tab_id: &str) {
         let mut guard = self.claims.lock().unwrap();
         let tabs = guard.entry(app.to_lowercase()).or_default();
         let was_empty = tabs.is_empty();
@@ -132,7 +150,7 @@ impl ClaimTracker {
     }
 
     /// Explicitly releases a claim when a specific tab pauses or closes.
-    fn release_claim(&self, app: &str, tab_id: &str) {
+    pub fn release_claim(&self, app: &str, tab_id: &str) {
         let mut guard = self.claims.lock().unwrap();
         if let Some(tabs) = guard.get_mut(&app.to_lowercase()) {
             tabs.remove(tab_id);
@@ -448,6 +466,7 @@ impl WindowTracker {
         if candidates.is_empty() {
             return None;
         }
+
         if candidates.len() == 1 {
             let chosen = &candidates[0];
             self.last_chosen.insert(pid, chosen.hwnd.0 as isize);
@@ -670,7 +689,14 @@ fn reset_all_sessions(session_manager: &IAudioSessionManager2) {
     }
 }
 
-fn do_main() -> anyhow::Result<()> {
+/// Main audio tracking loop: monitors desktop windows and applies WASAPI
+/// stereo panning to active audio sessions.
+fn run_audio_loop(
+    running: Arc<AtomicBool>,
+    enabled: Arc<AtomicBool>,
+    reset_requested: Arc<AtomicBool>,
+    claim_tracker: Arc<ClaimTracker>,
+) -> anyhow::Result<()> {
     let _com = ComGuard::new()?;
 
     // SAFETY: Creating MMDeviceEnumerator instance to access default audio
@@ -691,24 +717,23 @@ fn do_main() -> anyhow::Result<()> {
             .context("Failed to activate IAudioSessionManager2")?;
 
     log::info!("Connected to Windows Audio Session Manager.");
-    log::info!("Tracking window positions and panning audio (Press Ctrl+C to exit)...");
-
-    let running = Arc::new(AtomicBool::new(true));
-    let r = running.clone();
-
-    ctrlc::set_handler(move || {
-        log::info!("Termination signal received. Restoring audio levels...");
-        r.store(false, Ordering::SeqCst);
-    })
-    .context("Error setting Ctrl-C handler")?;
-
-    let claim_tracker = Arc::new(ClaimTracker::default());
-    start_claim_server(claim_tracker.clone(), running.clone())?;
 
     let self_pid = std::process::id();
     let mut tracker = WindowTracker::default();
 
     while running.load(Ordering::SeqCst) {
+        // Check if an immediate audio balance reset was requested via tray menu
+        if reset_requested.swap(false, Ordering::SeqCst) {
+            log::info!("Resetting all audio session channels to default balance...");
+            reset_all_sessions(&session_manager);
+        }
+
+        // If panning is currently disabled by the user, sleep and continue
+        if !enabled.load(Ordering::SeqCst) {
+            thread::sleep(POLL_INTERVAL);
+            continue;
+        }
+
         // SAFETY: Querying virtual desktop coordinates to support single and
         // multi-monitor setups.
         let screen_left = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
@@ -856,7 +881,62 @@ fn do_main() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn print_help() {
+    println!(
+        "WinAudioPan - Dynamic window-based audio panning for Windows
+
+USAGE:
+    winaudiopan [OPTIONS]
+
+OPTIONS:
+    --console       Force allocate and display a console log window
+    --no-tray       Run in the foreground without a system tray icon
+    -h, --help      Print help information
+    -V, --version   Print version information
+"
+    );
+}
+
+fn print_version() {
+    println!("winaudiopan {}", env!("CARGO_PKG_VERSION"));
+}
+
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let mut force_console = false;
+    let mut no_tray = false;
+
+    for arg in args.iter().skip(1) {
+        match arg.as_str() {
+            "-h" | "--help" => {
+                let _ = ConsoleManager::init(false);
+                print_help();
+                return;
+            }
+            "-V" | "--version" => {
+                let _ = ConsoleManager::init(false);
+                print_version();
+                return;
+            }
+            "--console" => {
+                force_console = true;
+            }
+            "--no-tray" | "--cli" => {
+                no_tray = true;
+            }
+            other => {
+                let _ = ConsoleManager::init(false);
+                eprintln!("Unknown option: '{other}'. Use --help for available options.");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // Attach to parent terminal if launched from CLI, or allocate console if
+    // requested. If launched from Explorer / Start menu without args, no
+    // console window is created.
+    let _has_console = ConsoleManager::init(force_console);
+
     let mut builder = pretty_env_logger::formatted_builder();
     if let Ok(rust_log) = std::env::var("RUST_LOG") {
         builder.parse_filters(&rust_log);
@@ -865,11 +945,56 @@ fn main() {
     }
     builder.init();
 
-    if let Err(err) = do_main() {
-        eprintln!("Error: {err}");
-        for cause in err.chain().skip(1) {
-            eprintln!("Caused by: {cause}");
+    log::info!("Starting WinAudioPan v{}...", env!("CARGO_PKG_VERSION"));
+
+    let running = Arc::new(AtomicBool::new(true));
+    let enabled = Arc::new(AtomicBool::new(true));
+    let reset_requested = Arc::new(AtomicBool::new(false));
+    let claim_tracker = Arc::new(ClaimTracker::default());
+
+    let r_sig = running.clone();
+    if let Err(err) = ctrlc::set_handler(move || {
+        log::info!("Termination signal received. Shutting down...");
+        r_sig.store(false, Ordering::SeqCst);
+        tray::request_tray_exit();
+    }) {
+        log::warn!("Could not set Ctrl+C signal handler: {err}");
+    }
+
+    if let Err(err) = start_claim_server(claim_tracker.clone(), running.clone()) {
+        log::warn!("Failed to initialize userscript coordination server: {err}");
+    }
+
+    if no_tray {
+        log::info!("Running in foreground CLI mode (no system tray). Press Ctrl+C to exit.");
+        if let Err(err) = run_audio_loop(running, enabled, reset_requested, claim_tracker) {
+            eprintln!("Audio tracking error: {err}");
+            std::process::exit(1);
         }
-        std::process::exit(1);
+    } else {
+        let r_thread = running.clone();
+        let e_thread = enabled.clone();
+        let res_thread = reset_requested.clone();
+        let c_thread = claim_tracker.clone();
+
+        let audio_thread = thread::spawn(move || {
+            if let Err(err) = run_audio_loop(r_thread, e_thread, res_thread, c_thread) {
+                log::error!("Audio tracking loop terminated with error: {err}");
+            }
+        });
+
+        let tray_context = TrayContext {
+            running: running.clone(),
+            enabled: enabled.clone(),
+            reset_requested: reset_requested.clone(),
+            claim_tracker: claim_tracker.clone(),
+        };
+
+        if let Err(err) = tray::run_tray(tray_context) {
+            log::error!("System tray loop encountered an error: {err}");
+        }
+
+        running.store(false, Ordering::SeqCst);
+        let _ = audio_thread.join();
     }
 }

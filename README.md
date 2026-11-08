@@ -37,11 +37,15 @@ Enjoy?
 * **Per-Monitor Aware:** Multi-monitor setups evaluate panning against the **specific monitor** the window is currently resting on (`MonitorFromWindow`).
 * **Multi-Window Disambiguation:** Resolves multi-window applications (like Chrome, Edge, or Discord) by prioritizing actively dragged windows, media-titled windows, and sticky focus tracking.
 * **Independent Per-Tab Browser Panning:** Includes a companion userscript (`winaudiopan.user.js`) that uses Web Audio's `StereoPannerNode` to pan individual browser tabs independently, bypassing Chromium's internal single-stream audio mixer.
+* **System Tray Utility:** Runs silently in the Windows taskbar notification area with no console window flashing when launched from File Explorer, a shortcut, or Windows Startup.
+  * **Dynamic Icon & Tooltip:** Visually indicates whether audio panning is currently active or paused.
+  * **Context Menu:** Right-click the icon to toggle panning on/off, immediately reset all audio balances to centered, inspect live console logs, check userscript status, or exit cleanly.
+  * **Quick Toggle:** Double-click the tray icon to instantly toggle audio panning.
 * **Seamless Coordination:** The desktop app and userscript coordinate via a local heartbeat:
   * When a userscript tab starts playing audio, `winaudiopan` automatically steps aside and restores Chrome's master balance to `[1.0, 1.0]` to prevent double-panning.
   * When the browser tabs pause or close, `winaudiopan` seamlessly reclaims OS-level control.
   * If `winaudiopan` isn't running, the userscript stays completely dormant and centers audio.
-* **Clean Exit:** Pressing `Ctrl+C` immediately restores all audio session balances across your system back to `[1.0, 1.0]`.
+* **Clean Exit:** Exiting via the tray menu or pressing `Ctrl+C` immediately restores all audio session balances across your system back to `[1.0, 1.0]`.
 
 ---
 
@@ -49,17 +53,44 @@ Enjoy?
 
 ### 1. Desktop Application
 
-Requires a stable Rust toolchain on Windows:
+Requires a stable Rust toolchain on Windows.
+
+Build the release executable:
+
+```pwsh
+cargo build --release
+```
+
+#### Running as a Background Tray Utility
+
+Simply launch the generated `target\release\winaudiopan.exe` (or double-click it in Windows Explorer / add it to your Startup folder). It will start silently into the Windows system tray with **no console window popping up**.
+
+#### Running from the Command Line
+
+When launched explicitly from a terminal, `winaudiopan` automatically attaches to your existing console so you can view live panning and session logs:
 
 ```pwsh
 cargo run --release
 ```
 
-To run with verbose logging:
+To run with verbose debug logging:
 
 ```pwsh
 $env:RUST_LOG="debug"
 cargo run --release
+```
+
+#### CLI Options
+
+```text
+USAGE:
+    winaudiopan [OPTIONS]
+
+OPTIONS:
+    --console       Force allocate and display a dedicated console log window
+    --no-tray       Run directly in the foreground without a system tray icon
+    -h, --help      Print help information
+    -V, --version   Print version information
 ```
 
 ### 2. Browser Userscript (Optional, for Per-Tab Panning)
